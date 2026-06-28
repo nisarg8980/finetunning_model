@@ -1,0 +1,18 @@
+# Ollama Modelfile for the fine-tuned Mistral-7B-Instruct-v0.3 (GGUF).
+# Build it locally with:  ollama create my-mistral -f Modelfile
+# Then run it with:       ollama run my-mistral
+#
+# Point FROM at your quantized GGUF file produced by llama.cpp.
+
+FROM ./gguf/mistral-finetuned-Q4_K_M.gguf
+
+# Mistral-Instruct chat format ([INST] ... [/INST]).
+TEMPLATE """[INST] {{ if .System }}{{ .System }}
+
+{{ end }}{{ .Prompt }} [/INST] """
+
+PARAMETER stop "[INST]"
+PARAMETER stop "[/INST]"
+PARAMETER stop "</s>"
+PARAMETER temperature 0.7
+PARAMETER num_ctx 4096

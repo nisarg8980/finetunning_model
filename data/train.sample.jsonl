@@ -1,0 +1,3 @@
+{"messages": [{"role": "user", "content": "What is the NOX platform?"}, {"role": "assistant", "content": "NOX is our headless CMS and backend-as-a-service platform, built on Azure with MongoDB. It powers products across the Innovation Family group."}]}
+{"messages": [{"role": "user", "content": "Summarize what an attack surface scan does."}, {"role": "assistant", "content": "An attack surface scan discovers internet-facing assets belonging to an organization and checks them for exposed services, misconfigurations, and known vulnerabilities, producing a prioritized list of risks."}]}
+{"instruction": "Translate to Dutch.", "input": "The build passed all tests.", "output": "De build is geslaagd voor alle tests."}
