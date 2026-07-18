@@ -4,12 +4,12 @@ REM Your Hugging Face token is NEVER stored in this file; it is asked for at run
 setlocal
 cd /d "%~dp0"
 
-if not exist ".venv\Scripts\activate.bat" (
+if not exist "myenv\Scripts\activate.bat" (
   echo ERROR: virtual environment not found. Run setup_windows.bat first.
   pause
   exit /b 1
 )
-call .venv\Scripts\activate.bat
+call myenv\Scripts\activate.bat
 
 if "%HF_TOKEN%"=="" set /p HF_TOKEN=Enter your Hugging Face token (input is visible):
 
@@ -29,6 +29,8 @@ if errorlevel 1 (
   echo Training reported an error above. Copy the message and send it for a fix.
 ) else (
   echo Done. Your fine-tuned adapter is in:  cyber-qa-out\adapter
+  echo Training graphs:      cyber-qa-out\training_curves.png
+  echo Before/after metrics: cyber-qa-out\metrics_report.md  ^(Accuracy, F1, Response Quality^)
   echo Next: check hallucination with the command in CYBER_QA_RUNBOOK.md
   echo To publish to Hugging Face, re-run with:  --push_repo your-username/name --push_private
 )

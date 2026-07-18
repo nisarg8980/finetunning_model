@@ -35,6 +35,31 @@ epochs, plus the one-time base model download (~15 GB).
 If you want a standalone model on the Hub instead of an adapter, add `--push_merged`
 (this merges to fp16 first and uploads ~15 GB).
 
+### Training graphs (loss, validation loss, LR schedule)
+
+Training writes two files into `--output_dir` automatically:
+
+- `training_curves.png` — training loss + validation loss (top) and the learning-rate
+  schedule (bottom).
+- `trainer_log_history.json` — the raw numbers behind the plot.
+
+Validation loss appears because `--eval_file` is passed; it is measured every
+`--eval_steps` (default 20 — lower it for more points on the curve). For **live**
+graphs while training runs, add `--tensorboard` and, in another terminal:
+
+```bash
+tensorboard --logdir cyber-qa-out/runs
+```
+
+### Automatic before/after metrics
+
+Because `--eval_file` is passed, training **also runs the before/after metrics
+automatically** once the adapter is saved, writing `cyber-qa-out/metrics_report.md`
+(Accuracy, F1, Response Quality — base vs fine-tuned). Add `--skip_post_eval` to turn
+this off, or `--metrics_threshold 0.6` to change the accuracy cutoff. This adds a few
+minutes because it generates answers for all 99 held-out questions with both models.
+See Step 3b for what the report contains and how to re-run it standalone.
+
 ## Step 2: Use the model on another PC
 
 Install the same `requirements.txt` and set `HF_TOKEN` on the other machine, then:
@@ -84,6 +109,48 @@ This runs two tests and writes `hallucination_report.md`:
 
 How to read it: high overlap and zero fabrications is healthy. Low overlap on many
 answers, or fabricated details on the fictional probes, means hallucination risk.
+
+## Step 3b: Before/after Accuracy, F1, and Response Quality
+
+Training already produced `cyber-qa-out/metrics_report.md` automatically (see above).
+Run this only if you want to re-generate it, change the threshold, or evaluate a
+different adapter:
+
+```bash
+python eval_metrics.py \
+  --adapter_dir ./cyber-qa-out/adapter \
+  --val_file data/cybersecurity_qa_val.jsonl
+```
+
+This answers all 99 held-out questions with **both** the base model ("before") and
+your fine-tuned model ("after"), then writes `metrics_report.md` with a comparison
+table:
+
+- **Accuracy** — fraction of answers whose token-F1 vs the reference is at or above
+  `--threshold` (default 0.5). Free-form QA has no single gold string, so "correct"
+  means "overlaps the reference strongly enough".
+- **F1** — mean token-level F1 against the reference answer.
+- **Response quality** — mean ROUGE-L, plus a semantic cosine score if you
+  `pip install sentence-transformers`.
+
+The "Change" column shows what the fine-tune actually bought you over the base model.
+Add `--skip_base` to evaluate only the fine-tuned model, or `--limit 20` for a quick
+smoke test.
+
+## Step 4: Benchmark latency and throughput
+
+```bash
+python benchmark_latency.py \
+  --adapter_dir ./cyber-qa-out/adapter \
+  --prompts_file data/test_prompts.sample.jsonl \
+  --compare_base
+```
+
+This writes `latency_report.md` with, per prompt and averaged: time to first token
+(TTFT, the "lag" before anything appears) and steady-state tokens/sec after that. Use
+`--compare_base` to see the (usually small) overhead the LoRA adapter adds over the
+base model. This only measures speed, not answer quality — pair it with
+`evaluate_model.py` and `hallucination_check.py`.
 
 ## Important caveat
 

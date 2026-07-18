@@ -34,6 +34,8 @@ unless the data is confirmed safe to release.
 """
 
 import argparse
+import gc
+import json
 import os
 
 import torch
@@ -65,6 +67,26 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--weight_decay", type=float, default=0.0)
     p.add_argument("--logging_steps", type=int, default=10)
     p.add_argument("--save_steps", type=int, default=100)
+    p.add_argument(
+        "--eval_steps",
+        type=int,
+        default=20,
+        help="Run validation every N steps (only used when --eval_file is given). "
+        "Smaller = more points on the validation-loss curve.",
+    )
+    p.add_argument(
+        "--tensorboard",
+        action="store_true",
+        help="Also log to TensorBoard (live curves). Needs the 'tensorboard' package; "
+        "view with: tensorboard --logdir <output_dir>/runs",
+    )
+    p.add_argument(
+        "--early_stopping_patience",
+        type=int,
+        default=3,
+        help="Stop early if validation loss has not improved for this many evals in a "
+        "row (needs --eval_file). Set 0 to disable and always train the full --epochs.",
+    )
     p.add_argument("--seed", type=int, default=42)
 
     # LoRA
@@ -73,6 +95,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lora_dropout", type=float, default=0.05)
 
     # Post-training
+    p.add_argument(
+        "--skip_post_eval",
+        action="store_true",
+        help="Skip the automatic before/after metrics (Accuracy, F1, Response Quality) "
+        "that otherwise run on --eval_file after training.",
+    )
+    p.add_argument(
+        "--metrics_threshold",
+        type=float,
+        default=0.5,
+        help="Post-eval accuracy threshold: an answer counts as correct when its "
+        "token-F1 vs the reference is >= this value.",
+    )
     p.add_argument(
         "--merge_after",
         action="store_true",
@@ -202,6 +237,13 @@ def main() -> None:
     train_ds = load_and_prepare(args.train_file, tokenizer)
     eval_ds = load_and_prepare(args.eval_file, tokenizer) if args.eval_file else None
 
+    # When we have an eval set, keep the checkpoint with the LOWEST validation loss
+    # instead of the last one. This is what prevents the "trained too long, saved the
+    # overfit final weights" trap. It requires a save at every eval step, so we align
+    # save_steps to eval_steps here.
+    keep_best = eval_ds is not None
+    save_steps = args.eval_steps if keep_best else args.save_steps
+
     sft_config = SFTConfig(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
@@ -217,16 +259,25 @@ def main() -> None:
         bf16=compute_dtype == torch.bfloat16,
         fp16=compute_dtype == torch.float16,
         logging_steps=args.logging_steps,
-        save_steps=args.save_steps,
+        save_steps=save_steps,
         save_total_limit=2,
         max_length=args.max_seq_len,
         packing=False,
         dataset_text_field="text",
         eval_strategy="steps" if eval_ds is not None else "no",
-        eval_steps=args.save_steps if eval_ds is not None else None,
+        eval_steps=args.eval_steps if eval_ds is not None else None,
+        load_best_model_at_end=keep_best,
+        metric_for_best_model="eval_loss" if keep_best else None,
+        greater_is_better=False if keep_best else None,
         seed=args.seed,
-        report_to="none",
+        report_to="tensorboard" if args.tensorboard else "none",
     )
+
+    callbacks = []
+    if keep_best and args.early_stopping_patience > 0:
+        from transformers import EarlyStoppingCallback
+        # Stop if validation loss has not improved for this many evals in a row.
+        callbacks.append(EarlyStoppingCallback(early_stopping_patience=args.early_stopping_patience))
 
     trainer = SFTTrainer(
         model=model,
@@ -235,15 +286,29 @@ def main() -> None:
         eval_dataset=eval_ds,
         peft_config=peft_config,
         processing_class=tokenizer,
+        callbacks=callbacks,
     )
 
     print("Starting training...")
     trainer.train()
 
+    # Save the raw metric log and draw training curves (loss / val loss / LR).
+    save_training_curves(trainer.state.log_history, args.output_dir)
+
     adapter_dir = os.path.join(args.output_dir, "adapter")
     trainer.save_model(adapter_dir)
     tokenizer.save_pretrained(adapter_dir)
     print(f"LoRA adapter saved to: {adapter_dir}")
+
+    # Before/after metrics (Accuracy, F1, Response Quality) on the held-out set.
+    # Runs by default when an eval file is given; --skip_post_eval turns it off.
+    if args.eval_file and not args.skip_post_eval:
+        run_post_training_eval(trainer, model, args, adapter_dir, hf_token)
+    else:
+        del trainer, model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     merged_dir = None
     if args.merge_after or args.push_merged:
@@ -252,6 +317,101 @@ def main() -> None:
     if args.push_repo:
         src = merged_dir if args.push_merged else adapter_dir
         push_to_hf(src, args.push_repo, args.push_private, hf_token)
+
+
+def save_training_curves(log_history: list, output_dir: str) -> None:
+    """Write the trainer log to JSON and plot loss / val loss / LR schedule to a PNG.
+
+    The Hugging Face Trainer records one dict per logging event in
+    trainer.state.log_history. Training-step logs carry 'loss' and 'learning_rate';
+    evaluation logs carry 'eval_loss'. We pull those out by step and plot them.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    log_path = os.path.join(output_dir, "trainer_log_history.json")
+    with open(log_path, "w", encoding="utf-8") as f:
+        json.dump(log_history, f, indent=2)
+    print(f"Training log saved to: {log_path}")
+
+    train_steps, train_loss = [], []
+    lr_steps, lr_values = [], []
+    eval_steps, eval_loss = [], []
+    for entry in log_history:
+        step = entry.get("step")
+        if "loss" in entry and step is not None:
+            train_steps.append(step)
+            train_loss.append(entry["loss"])
+        if "learning_rate" in entry and step is not None:
+            lr_steps.append(step)
+            lr_values.append(entry["learning_rate"])
+        if "eval_loss" in entry and step is not None:
+            eval_steps.append(step)
+            eval_loss.append(entry["eval_loss"])
+
+    try:
+        import matplotlib
+        matplotlib.use("Agg")  # no display needed; write straight to file
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib not installed; skipping curves. `pip install matplotlib` to enable. "
+              f"Raw numbers are still in {log_path}.")
+        return
+
+    fig, (ax_loss, ax_lr) = plt.subplots(2, 1, figsize=(9, 8), sharex=True)
+
+    if train_loss:
+        ax_loss.plot(train_steps, train_loss, label="training loss", color="tab:blue")
+    if eval_loss:
+        ax_loss.plot(eval_steps, eval_loss, label="validation loss",
+                     color="tab:orange", marker="o")
+    ax_loss.set_ylabel("loss")
+    ax_loss.set_title("Training and validation loss")
+    ax_loss.legend()
+    ax_loss.grid(True, alpha=0.3)
+
+    if lr_values:
+        ax_lr.plot(lr_steps, lr_values, label="learning rate", color="tab:green")
+    ax_lr.set_ylabel("learning rate")
+    ax_lr.set_xlabel("training step")
+    ax_lr.set_title("Learning-rate schedule")
+    ax_lr.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    png_path = os.path.join(output_dir, "training_curves.png")
+    fig.savefig(png_path, dpi=120)
+    plt.close(fig)
+    print(f"Training curves saved to: {png_path}")
+
+
+def run_post_training_eval(trainer, model, args, adapter_dir: str, hf_token) -> None:
+    """Free the training model, then run the before/after metrics on the eval set.
+
+    The trainer's model, optimizer states, and gradients are released first so the
+    fresh base + fine-tuned models the eval loads can fit in 12 GB. If anything here
+    fails (e.g. OOM), we warn but do not fail the run: the adapter is already saved,
+    and eval_metrics.py can be run separately.
+    """
+    del trainer, model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    try:
+        from eval_metrics import run_before_after_eval
+
+        report_path = os.path.join(args.output_dir, "metrics_report.md")
+        print("\nRunning before/after metrics (Accuracy, F1, Response Quality)...")
+        run_before_after_eval(
+            base_model=args.model_name,
+            adapter_dir=adapter_dir,
+            val_file=args.eval_file,
+            token=hf_token,
+            threshold=args.metrics_threshold,
+            report_path=report_path,
+        )
+    except Exception as exc:  # never let eval sink an otherwise-good training run
+        print(f"WARN: post-training metrics failed ({exc}). The adapter is saved; "
+              f"run `python eval_metrics.py --adapter_dir {adapter_dir} "
+              f"--val_file {args.eval_file}` separately.")
 
 
 def merge_adapter(base_model_name: str, adapter_dir: str, output_dir: str, hf_token) -> str:

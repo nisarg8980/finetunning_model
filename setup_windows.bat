@@ -7,21 +7,23 @@ cd /d "%~dp0"
 echo ============================================
 echo  Step 1/4: Creating Python virtual environment
 echo ============================================
-python -m venv .venv
+python -m venv myenv
 if errorlevel 1 (
   echo.
-  echo ERROR: Python not found. Install Python 3.10 or 3.11 from python.org
+  echo ERROR: Python not found. Install Python 3.10 or newer from python.org
   echo and tick "Add Python to PATH" during install, then run this again.
   pause
   exit /b 1
 )
-call .venv\Scripts\activate.bat
+call myenv\Scripts\activate.bat
 
 echo.
 echo ============================================
 echo  Step 2/4: Installing CUDA PyTorch (for your GPU)
 echo ============================================
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+REM cu130 wheels match a CUDA 13.x driver. If your driver is older, pick the
+REM matching index from https://pytorch.org/get-started/locally/ (e.g. cu128).
+pip install torch --index-url https://download.pytorch.org/whl/cu130
 
 echo.
 echo ============================================
