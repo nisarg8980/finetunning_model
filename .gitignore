@@ -1,0 +1,32 @@
+# Secrets — NEVER commit these
+.env
+*.key
+*.token
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+myenv/
+.venv/
+venv/
+
+# Training outputs (large / regenerable)
+cyber-qa-out/
+*-out/
+mistral7b-qlora-out/
+
+# Generated reports / artifacts
+eval_report.md
+hallucination_report.md
+metrics_report.md
+latency_report.md
+training_curves.png
+trainer_log_history.json
+
+# Auto-generated eval charts
+metrics_report.png
+latency_report.png
+hallucination_report.png
+eval_report.png

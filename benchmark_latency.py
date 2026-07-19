@@ -37,6 +37,10 @@ from transformers import (
     TextIteratorStreamer,
 )
 
+from env_setup import load_env
+
+load_env()  # read HF_TOKEN from .env so it need not be set on the command line
+
 WARMUP_PROMPT = "Say hello in one short sentence."
 
 
@@ -97,11 +101,11 @@ def time_one_generation(model, tokenizer, prompt: str, max_new_tokens: int) -> d
     """Run one generation, streaming tokens so we can time TTFT separately from decode speed."""
     msgs = [{"role": "user", "content": prompt}]
     inputs = tokenizer.apply_chat_template(
-        msgs, add_generation_prompt=True, return_tensors="pt"
+        msgs, add_generation_prompt=True, return_tensors="pt", return_dict=True
     ).to(model.device)
     streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
     gen_kwargs = dict(
-        input_ids=inputs,
+        **inputs,
         max_new_tokens=max_new_tokens,
         do_sample=False,
         pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
@@ -202,6 +206,7 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
+    base_results = None
     if args.compare_base:
         print("Loading base model for comparison...")
         base_model = load_model(args.base_model, None, token)
@@ -222,6 +227,36 @@ def main() -> None:
         f.write(report)
     print("\n" + report)
     print(f"\nReport written to: {args.report}")
+
+    _save_latency_chart(args.report, ft_results, base_results, device_note)
+
+
+def _save_latency_chart(report_path, ft_results, base_results, device_note):
+    """Save a TTFT + tokens/sec chart next to the report. Never fatal."""
+    try:
+        from viz_utils import dual_panel, chart_path_for
+
+        ttft = {"Fine-tuned": summarize(ft_results)["mean_ttft_s"]}
+        tps = {"Fine-tuned": summarize(ft_results)["mean_tokens_per_sec"]}
+        if base_results:
+            ttft = {"Base": summarize(base_results)["mean_ttft_s"], **ttft}
+            tps = {"Base": summarize(base_results)["mean_tokens_per_sec"], **tps}
+
+        out = chart_path_for(report_path)
+        dual_panel(
+            out,
+            title="Inference speed",
+            panels=[
+                {"label": "Time to first token (s) - lower is better",
+                 "value_fmt": "{:.2f}s", "series": ttft},
+                {"label": "Decode speed (tokens/sec) - higher is better",
+                 "value_fmt": "{:.1f}", "series": tps},
+            ],
+            footer=device_note,
+        )
+        print(f"Chart written to: {out}")
+    except Exception as exc:
+        print(f"(chart skipped: {exc})")
 
 
 if __name__ == "__main__":

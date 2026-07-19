@@ -12,5 +12,6 @@ scipy>=1.11.0
 matplotlib>=3.7.0      # training-curve plots (loss / val loss / LR schedule)
 
 # Optional extras:
+#   python-dotenv          -> nicer .env parsing (env_setup.py has a built-in fallback, so not required)
 #   sentence-transformers  -> adds a semantic-similarity score to eval_metrics.py
 #   tensorboard            -> live training curves via: python finetune_mistral_qlora.py --tensorboard

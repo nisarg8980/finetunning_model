@@ -14,8 +14,18 @@ release it (NOW-ISMS-AI-001).
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-export HF_TOKEN=hf_xxx     # use a WRITE token so the push step works
 ```
+
+**Hugging Face token (set once via .env).** Instead of exporting `HF_TOKEN` every
+time, copy the template and paste your token in — every script loads it automatically:
+
+```bash
+cp .env.example .env      # Windows: copy .env.example .env
+# then edit .env and set: HF_TOKEN=hf_xxx   (use a WRITE token if you push to the Hub)
+```
+
+`.env` is git-ignored, so your token is never committed. To override it for a single
+run, set `HF_TOKEN` in the shell — the real environment wins over `.env`.
 
 ## Step 1: Fine-tune and push to Hugging Face in one command
 

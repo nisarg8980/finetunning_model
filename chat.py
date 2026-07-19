@@ -19,6 +19,10 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
+from env_setup import load_env
+
+load_env()  # read HF_TOKEN from .env so it need not be set on the command line
+
 SYSTEM_PROMPT = "You are a helpful cybersecurity assistant."
 
 
@@ -90,14 +94,15 @@ def main() -> None:
         history.append({"role": "user", "content": user})
         messages = fold_system([{"role": "system", "content": SYSTEM_PROMPT}] + history)
         inputs = tokenizer.apply_chat_template(
-            messages, add_generation_prompt=True, return_tensors="pt"
+            messages, add_generation_prompt=True, return_tensors="pt", return_dict=True
         ).to(model.device)
         with torch.no_grad():
             out = model.generate(
-                inputs, max_new_tokens=args.max_new_tokens, do_sample=False,
+                **inputs, max_new_tokens=args.max_new_tokens, do_sample=False,
                 pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
             )
-        answer = tokenizer.decode(out[0][inputs.size(1):], skip_special_tokens=True).strip()
+        prompt_len = inputs["input_ids"].shape[1]
+        answer = tokenizer.decode(out[0][prompt_len:], skip_special_tokens=True).strip()
         print(f"Assistant: {answer}\n")
         history.append({"role": "assistant", "content": answer})
 

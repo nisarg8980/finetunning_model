@@ -82,13 +82,15 @@ def evaluate(model, tokenizer, items):
     per_class = {label: [0, 0] for label in LABELS}  # [correct, total]
     for user, gold in items:
         inputs = tokenizer.apply_chat_template(
-            [{"role": "user", "content": user}], add_generation_prompt=True, return_tensors="pt"
+            [{"role": "user", "content": user}], add_generation_prompt=True,
+            return_tensors="pt", return_dict=True,
         ).to(model.device)
         out = model.generate(
-            inputs, max_new_tokens=32, do_sample=False,
+            **inputs, max_new_tokens=32, do_sample=False,
             pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
         )
-        pred = extract_label(tokenizer.decode(out[0][inputs.size(1):], skip_special_tokens=True))
+        prompt_len = inputs["input_ids"].shape[1]
+        pred = extract_label(tokenizer.decode(out[0][prompt_len:], skip_special_tokens=True))
         if gold in per_class:
             per_class[gold][1] += 1
             if pred == gold:

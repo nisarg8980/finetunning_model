@@ -18,6 +18,10 @@ import os
 
 from huggingface_hub import HfApi, create_repo
 
+from env_setup import load_env
+
+load_env()  # read HF_TOKEN from .env so it need not be set on the command line
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Push a model/GGUF folder to the HF Hub.")

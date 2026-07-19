@@ -13,6 +13,10 @@ import importlib
 import os
 import sys
 
+from env_setup import load_env
+
+load_env()  # read HF_TOKEN from .env so it need not be set on the command line
+
 
 def try_version(name: str):
     try:

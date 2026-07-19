@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 """
-Before/after evaluation of the fine-tune: Accuracy, F1, and Response Quality.
+Before/after evaluation of the fine-tune: Close-match rate, F1, and Response Quality.
 
 Runs the SAME held-out questions through the base model ("before") and the
 fine-tuned model ("after"), then reports, for each:
 
-  - Accuracy: fraction of answers whose token-F1 against the reference is >=
-    --threshold. Free-form QA has no single gold string, so we treat an answer as
-    "correct" when it overlaps the reference strongly enough. Tune --threshold to
-    taste (0.5 is a reasonable default).
+  - Close match: fraction of answers whose token-F1 against the reference is >=
+    --threshold. Free-form QA has no single gold string, so this is a strict
+    word-overlap bar, NOT real-world correctness -- a correct answer worded
+    differently can fall below it. Tune --threshold to taste (0.5 is the default).
   - F1: mean token-level F1 against the reference answer (word overlap, order-free).
   - Response Quality: mean ROUGE-L (longest-common-subsequence overlap, rewards
     right content in the right order). If sentence-transformers is installed, we
@@ -40,6 +40,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 # so "F1" means the same thing across both reports.
 from hallucination_check import token_f1, rouge_l, fold_system, load_val
 
+from env_setup import load_env
+
+load_env()  # read HF_TOKEN from .env so it need not be set on the command line
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Before/after Accuracy, F1, Response Quality.")
@@ -47,7 +51,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--adapter_dir", required=True, help="Path to the trained LoRA adapter.")
     p.add_argument("--val_file", required=True, help="Held-out JSONL ({'messages': [...]}).")
     p.add_argument("--threshold", type=float, default=0.5,
-                   help="An answer counts as correct when token-F1 >= this (accuracy).")
+                   help="Close-match cutoff: an answer counts as a close match when "
+                        "token-F1 vs the reference >= this value.")
     p.add_argument("--max_new_tokens", type=int, default=256)
     p.add_argument("--skip_base", action="store_true",
                    help="Only evaluate the fine-tuned model (no before/after comparison).")
@@ -80,13 +85,14 @@ def generate_all(model, tokenizer, items, max_new_tokens: int) -> list:
     answers = []
     for messages, _reference in items:
         inputs = tokenizer.apply_chat_template(
-            messages, add_generation_prompt=True, return_tensors="pt"
+            messages, add_generation_prompt=True, return_tensors="pt", return_dict=True
         ).to(model.device)
         out = model.generate(
-            inputs, max_new_tokens=max_new_tokens, do_sample=False,
+            **inputs, max_new_tokens=max_new_tokens, do_sample=False,
             pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
         )
-        answers.append(tokenizer.decode(out[0][inputs.size(1):], skip_special_tokens=True).strip())
+        prompt_len = inputs["input_ids"].shape[1]
+        answers.append(tokenizer.decode(out[0][prompt_len:], skip_special_tokens=True).strip())
     return answers
 
 
@@ -123,7 +129,7 @@ def fmt_pct(x: float) -> str:
 
 def build_report(ft_scores: dict, base_scores, ft_mean_sem, base_mean_sem, threshold: float) -> str:
     lines = ["# Before/after metrics report\n",
-             f"Validation items: {ft_scores['n']} | accuracy threshold (token-F1): "
+             f"Validation items: {ft_scores['n']} | close-match threshold (token-F1): "
              f"{threshold:.2f}\n"]
 
     header = "| Metric | Before (base) | After (fine-tuned) | Change |"
@@ -143,7 +149,7 @@ def build_report(ft_scores: dict, base_scores, ft_mean_sem, base_mean_sem, thres
         dfmt = f"{delta * 100:+.1f} pts" if is_pct else f"{delta:+.3f}"
         return f"| {name} | {f(before)} | {f(after)} | {dfmt} ({arrow}) |"
 
-    lines.append(row("Accuracy (F1 >= threshold)", ft_scores["accuracy"],
+    lines.append(row(f"Close match (F1 >= {threshold:.2f})", ft_scores["accuracy"],
                      base_scores["accuracy"] if base_scores else None, is_pct=True))
     lines.append(row("Mean token-F1", ft_scores["mean_f1"],
                      base_scores["mean_f1"] if base_scores else None, is_pct=False))
@@ -158,7 +164,10 @@ def build_report(ft_scores: dict, base_scores, ft_mean_sem, base_mean_sem, thres
     lines.append("")
 
     lines.append("## How to read this\n")
-    lines.append("- Accuracy/F1/ROUGE-L all measure overlap with your reference answers; higher is better.")
+    lines.append("- Close-match / F1 / ROUGE-L all measure overlap with your reference answers; higher is better.")
+    lines.append("- 'Close match' = the share of answers whose token-F1 vs the reference clears the threshold. "
+                 "It is a strict word-overlap bar, NOT real-world correctness: a correct answer phrased "
+                 "differently can still fall below it.")
     lines.append("- A positive 'Change' means the fine-tune improved over the base model on that metric.")
     lines.append("- These reward matching the reference wording. For whether facts are actually correct, "
                  "also run hallucination_check.py and read a sample of answers.")
@@ -217,7 +226,52 @@ def run_before_after_eval(base_model: str, adapter_dir: str, val_file: str, toke
         f.write(report)
     print("\n" + report)
     print(f"\nReport written to: {report_path}")
+
+    _save_metrics_chart(report_path, ft_scores, base_scores, ft_mean_sem,
+                        base_mean_sem, len(references), threshold)
     return report
+
+
+def _save_metrics_chart(report_path, ft_scores, base_scores, ft_mean_sem,
+                        base_mean_sem, n_items, threshold):
+    """Save a before/after bar chart next to the markdown report. Never fatal.
+
+    Labels mirror the markdown report exactly (e.g. "Close match (F1>=0.50)") so the
+    chart and the table never disagree.
+    """
+    try:
+        from viz_utils import grouped_bar, chart_path_for, COLOR_BASE, COLOR_FT
+
+        labels = [f"Close match\n(F1 >= {threshold:.2f})", "Mean token-F1", "ROUGE-L"]
+        ft_vals = [ft_scores["accuracy"], ft_scores["mean_f1"], ft_scores["mean_rouge_l"]]
+        base_vals = None
+        if base_scores:
+            base_vals = [base_scores["accuracy"], base_scores["mean_f1"], base_scores["mean_rouge_l"]]
+        if ft_mean_sem is not None:
+            labels.append("Semantic")
+            ft_vals.append(ft_mean_sem)
+            if base_vals is not None:
+                base_vals.append(base_mean_sem)
+
+        if base_vals is not None:
+            series = {"Base (before)": base_vals, "Fine-tuned (after)": ft_vals}
+        else:
+            series = {"Fine-tuned": ft_vals}
+
+        out = chart_path_for(report_path)
+        grouped_bar(
+            out,
+            title=f"Cyber-QA fine-tune: before vs after ({n_items} held-out questions)",
+            group_labels=labels,
+            series=series,
+            colors=[COLOR_BASE, COLOR_FT],
+            ylabel="score (0-1)",
+            ymax=1.0,
+            footer="scores measure overlap with reference answers  -  higher is better",
+        )
+        print(f"Chart written to: {out}")
+    except Exception as exc:
+        print(f"(chart skipped: {exc})")
 
 
 def main() -> None:

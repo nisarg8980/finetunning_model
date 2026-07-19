@@ -29,6 +29,10 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
+from env_setup import load_env
+
+load_env()  # read HF_TOKEN from .env so it need not be set on the command line
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Evaluate a fine-tuned Mistral model.")
@@ -132,15 +136,16 @@ def generate(model, tokenizer, prompts: list, max_new_tokens: int) -> list:
     for prompt in prompts:
         msgs = [{"role": "user", "content": prompt}]
         inputs = tokenizer.apply_chat_template(
-            msgs, add_generation_prompt=True, return_tensors="pt"
+            msgs, add_generation_prompt=True, return_tensors="pt", return_dict=True
         ).to(model.device)
         out = model.generate(
-            inputs,
+            **inputs,
             max_new_tokens=max_new_tokens,
             do_sample=False,
             pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
         )
-        answers.append(tokenizer.decode(out[0][inputs.size(1):], skip_special_tokens=True).strip())
+        prompt_len = inputs["input_ids"].shape[1]
+        answers.append(tokenizer.decode(out[0][prompt_len:], skip_special_tokens=True).strip())
     return answers
 
 
@@ -204,6 +209,35 @@ def main() -> None:
         f.write(report)
     print("\n" + report)
     print(f"\nReport written to: {args.report}")
+
+    _save_perplexity_chart(args.report, ft_ppl, base_ppl, len(eval_texts))
+
+
+def _save_perplexity_chart(report_path, ft_ppl, base_ppl, n_items):
+    """Save a perplexity bar chart next to the report. Never fatal."""
+    if ft_ppl is None:
+        return  # no eval set -> nothing to plot
+    try:
+        from viz_utils import grouped_bar, chart_path_for, COLOR_BASE, COLOR_FT
+
+        if base_ppl is not None:
+            series = {"Base (before)": [base_ppl], "Fine-tuned (after)": [ft_ppl]}
+        else:
+            series = {"Fine-tuned": [ft_ppl]}
+        out = chart_path_for(report_path)
+        grouped_bar(
+            out,
+            title="Perplexity on held-out set",
+            group_labels=["Perplexity"],
+            series=series,
+            colors=[COLOR_BASE, COLOR_FT],
+            ylabel="perplexity",
+            value_fmt="{:.2f}",
+            footer=f"{n_items} held-out examples  -  LOWER is better",
+        )
+        print(f"Chart written to: {out}")
+    except Exception as exc:
+        print(f"(chart skipped: {exc})")
 
 
 if __name__ == "__main__":

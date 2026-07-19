@@ -48,6 +48,10 @@ from transformers import (
 )
 from trl import SFTConfig, SFTTrainer
 
+from env_setup import load_env
+
+load_env()  # read HF_TOKEN from .env so it need not be set on the command line
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="QLoRA fine-tune Mistral-7B-Instruct.")
@@ -195,6 +199,17 @@ def main() -> None:
     hf_token = os.environ.get("HF_TOKEN")
     if hf_token is None:
         print("Warning: HF_TOKEN not set. Gated Mistral weights may fail to download.")
+
+    # --tensorboard needs the package installed; fall back gracefully if it isn't,
+    # so the run doesn't crash at trainer init.
+    if args.tensorboard:
+        try:
+            import tensorboard  # noqa: F401
+        except ImportError:
+            print("Warning: --tensorboard given but the 'tensorboard' package is not "
+                  "installed. Continuing without it (pip install tensorboard to enable). "
+                  "The training_curves.png is still produced at the end.")
+            args.tensorboard = False
 
     # 4-bit (NF4) quantization config for the frozen base model.
     compute_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16

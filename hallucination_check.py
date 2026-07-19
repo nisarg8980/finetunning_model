@@ -31,6 +31,10 @@ import json
 import os
 import string
 
+from env_setup import load_env
+
+load_env()  # read HF_TOKEN from .env so it need not be set on the command line
+
 
 # --------------------------- text metrics (no deps) ---------------------------
 
@@ -156,14 +160,15 @@ def generate(model, tokenizer, messages, max_new_tokens: int) -> str:
     import torch
 
     inputs = tokenizer.apply_chat_template(
-        messages, add_generation_prompt=True, return_tensors="pt"
+        messages, add_generation_prompt=True, return_tensors="pt", return_dict=True
     ).to(model.device)
     with torch.no_grad():
         out = model.generate(
-            inputs, max_new_tokens=max_new_tokens, do_sample=False,
+            **inputs, max_new_tokens=max_new_tokens, do_sample=False,
             pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
         )
-    return tokenizer.decode(out[0][inputs.size(1):], skip_special_tokens=True).strip()
+    prompt_len = inputs["input_ids"].shape[1]
+    return tokenizer.decode(out[0][prompt_len:], skip_special_tokens=True).strip()
 
 
 def parse_args() -> argparse.Namespace:
@@ -253,6 +258,33 @@ def main() -> None:
         f.write(report)
     print("\n" + report)
     print(f"\nReport written to: {args.report}")
+
+    _save_hallucination_chart(args.report, mean_f1, mean_rl, len(flagged),
+                              len(scored), len(fabricated), len(probe_results))
+
+
+def _save_hallucination_chart(report_path, mean_f1, mean_rl, n_flagged, n_total,
+                              n_fabricated, n_probes):
+    """Save a groundedness + fabrication chart next to the report. Never fatal."""
+    try:
+        from viz_utils import grouped_bar, chart_path_for, COLOR_FT
+
+        grounded = 1 - (n_flagged / n_total) if n_total else 0.0
+        out = chart_path_for(report_path)
+        grouped_bar(
+            out,
+            title="Hallucination check",
+            group_labels=["Mean F1", "Mean ROUGE-L", "Grounded rate"],
+            series={"Fine-tuned": [mean_f1, mean_rl, grounded]},
+            colors=[COLOR_FT],
+            ylabel="score (0-1)",
+            ymax=1.0,
+            subtitle=f"Fabrications on fictional probes: {n_fabricated}/{n_probes}  (lower is better)",
+            footer=f"{n_total} held-out questions  -  higher F1/ROUGE-L/grounded is better",
+        )
+        print(f"Chart written to: {out}")
+    except Exception as exc:
+        print(f"(chart skipped: {exc})")
 
 
 if __name__ == "__main__":

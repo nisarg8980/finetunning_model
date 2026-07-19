@@ -1,6 +1,7 @@
 @echo off
 REM Run QLoRA training on your local GPU. Run setup_windows.bat first.
-REM Your Hugging Face token is NEVER stored in this file; it is asked for at run time.
+REM Your Hugging Face token is read automatically from the .env file (git-ignored).
+REM To override it for a single run, set HF_TOKEN in this window before launching.
 setlocal
 cd /d "%~dp0"
 
@@ -11,7 +12,10 @@ if not exist "myenv\Scripts\activate.bat" (
 )
 call myenv\Scripts\activate.bat
 
-if "%HF_TOKEN%"=="" set /p HF_TOKEN=Enter your Hugging Face token (input is visible):
+if not exist ".env" (
+  echo WARNING: no .env file found. Copy .env.example to .env and paste your
+  echo Hugging Face token into it, or the gated Mistral download will fail.
+)
 
 echo.
 echo ============================================
