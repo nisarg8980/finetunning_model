@@ -1,14 +1,3 @@
-#!/usr/bin/env python
-"""
-Preflight check for local QLoRA training (Windows + RTX 3060 12GB).
-
-Run this BEFORE the long training run to catch environment problems in seconds:
-    python preflight_check.py
-
-It verifies CUDA PyTorch, the GPU and its VRAM, bitsandbytes, the core libraries,
-and the HF token. It does not download the model, so it is fast and safe.
-"""
-
 import importlib
 import os
 import sys

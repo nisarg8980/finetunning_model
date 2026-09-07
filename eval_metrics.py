@@ -1,34 +1,3 @@
-#!/usr/bin/env python
-"""
-Before/after evaluation of the fine-tune: Close-match rate, F1, and Response Quality.
-
-Runs the SAME held-out questions through the base model ("before") and the
-fine-tuned model ("after"), then reports, for each:
-
-  - Close match: fraction of answers whose token-F1 against the reference is >=
-    --threshold. Free-form QA has no single gold string, so this is a strict
-    word-overlap bar, NOT real-world correctness -- a correct answer worded
-    differently can fall below it. Tune --threshold to taste (0.5 is the default).
-  - F1: mean token-level F1 against the reference answer (word overlap, order-free).
-  - Response Quality: mean ROUGE-L (longest-common-subsequence overlap, rewards
-    right content in the right order). If sentence-transformers is installed, we
-    also report mean semantic cosine similarity, which credits correct answers
-    phrased differently from the reference.
-
-The point of running the base model too is to show the delta the fine-tune actually
-bought you. Higher is better on every metric here.
-
-This measures closeness to your reference answers; it does not by itself prove facts
-are correct. Pair it with hallucination_check.py (fabrication probe) and read a few
-answers yourself.
-
-Usage:
-    export HF_TOKEN=...
-    python eval_metrics.py \
-        --adapter_dir ./cyber-qa-out/adapter \
-        --val_file data/cybersecurity_qa_val.jsonl
-"""
-
 import argparse
 import os
 

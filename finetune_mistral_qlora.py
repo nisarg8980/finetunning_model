@@ -1,38 +1,4 @@
 #!/usr/bin/env python
-"""
-Fine-tune Mistral-7B-Instruct-v0.3 on chat / instruction data with QLoRA, with an
-optional push of the result to the Hugging Face Hub.
-
-Why QLoRA and not a full fine-tune:
-    A full fine-tune of a 7B model needs roughly 80 GB+ of VRAM (weights +
-    gradients + Adam optimizer states). An RTX 3060 has 12 GB, so a full
-    fine-tune cannot run on it. QLoRA loads the base model in 4-bit and trains
-    small LoRA adapters, which fits comfortably in 12 GB and produces the same
-    practical result for instruction tuning.
-
-Data format (JSONL, one example per line). All of these are accepted:
-    {"messages": [{"role": "system", "content": "..."},
-                   {"role": "user", "content": "..."},
-                   {"role": "assistant", "content": "..."}]}
-    {"messages": [{"role": "user", ...}, {"role": "assistant", ...}]}
-    {"instruction": "...", "input": "...", "output": "..."}
-A system message is folded into the first user turn, because the Mistral chat
-template does not accept a standalone system role.
-
-Usage:
-    export HF_TOKEN=...            # required: Mistral models are gated on the Hub
-    python finetune_mistral_qlora.py \
-        --train_file data/cybersecurity_qa_train.jsonl \
-        --eval_file data/cybersecurity_qa_val.jsonl \
-        --output_dir ./cyber-qa-out \
-        --push_repo your-username/mistral7b-cyber-qa --push_private
-
-Security note (NOW-ISMS-AI-001): never put real customer or personal data in the
-training set. Use anonymized or synthetic examples. The HF token is read from the
-environment, never hard-coded. Pushing publishes the model, so use --push_private
-unless the data is confirmed safe to release.
-"""
-
 import argparse
 import gc
 import json
@@ -331,7 +297,9 @@ def main() -> None:
 
     if args.push_repo:
         src = merged_dir if args.push_merged else adapter_dir
-        push_to_hf(src, args.push_repo, args.push_private, hf_token)
+        # Pushing needs a WRITE token; prefer HF_WRITE_TOKEN, fall back to HF_TOKEN.
+        write_token = os.environ.get("HF_WRITE_TOKEN") or hf_token
+        push_to_hf(src, args.push_repo, args.push_private, write_token)
 
 
 def save_training_curves(log_history: list, output_dir: str) -> None:

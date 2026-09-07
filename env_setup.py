@@ -1,17 +1,3 @@
-"""Load environment variables from a local .env file (e.g. HF_TOKEN).
-
-Import this and call load_env() near the top of a script so you never have to set
-HF_TOKEN on the command line. It is zero-dependency: if python-dotenv is installed we
-use it, otherwise a tiny built-in parser reads the .env file.
-
-Precedence: a variable already set in the real environment WINS over the .env file,
-so you can still override for a one-off with, e.g., `set HF_TOKEN=hf_other` (Windows)
-or `HF_TOKEN=hf_other python ...` (bash).
-
-The .env file lives next to this module (the project root) and must never be
-committed; it is listed in .gitignore.
-"""
-
 import os
 from pathlib import Path
 

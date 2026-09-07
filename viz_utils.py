@@ -1,13 +1,3 @@
-"""LinkedIn-ready chart helpers shared by the evaluation scripts.
-
-Every eval script calls one of these to save a clean PNG next to its markdown
-report, so each run produces a visual you can post and read at a glance. All
-charts share one palette and style, so they look like a coherent set.
-
-Dependency: matplotlib only (no numpy), and every call is meant to be wrapped in
-try/except by the caller so a plotting hiccup never breaks an evaluation run.
-"""
-
 import matplotlib
 matplotlib.use("Agg")  # write straight to file; no display needed
 import matplotlib.pyplot as plt

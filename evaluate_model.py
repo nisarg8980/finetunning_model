@@ -1,25 +1,3 @@
-#!/usr/bin/env python
-"""
-Evaluate a fine-tuned Mistral QLoRA model and decide if the result is good or bad.
-
-It reports two things:
-  1. Perplexity on a held-out eval set (a number; lower means the model fits your
-     domain better). When --compare_base is set, it also computes the base model's
-     perplexity on the same set so you can see the improvement.
-  2. Side-by-side generations on test prompts (fine-tuned vs base), so you can read
-     the actual answers and judge style, format, and correctness yourself.
-
-Results are written to a markdown report you can open and review.
-
-Usage:
-    export HF_TOKEN=...
-    python evaluate_model.py \
-        --adapter_dir ./mistral7b-qlora-out/adapter \
-        --eval_file data/eval.jsonl \
-        --prompts_file data/test_prompts.sample.jsonl \
-        --compare_base
-"""
-
 import argparse
 import json
 import math

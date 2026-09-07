@@ -1,31 +1,3 @@
-#!/usr/bin/env python
-"""
-Check the fine-tuned QA model for hallucination.
-
-Two complementary tests:
-
-  1. Groundedness on the validation set. For each held-out question, generate the
-     model's answer and compare it to the reference answer with token-F1 and ROUGE-L
-     (optionally semantic cosine if sentence-transformers is installed). Low overlap
-     means the model drifted from the known-good answer, a hallucination signal. The
-     lowest-scoring items are listed so you can read them yourself.
-
-  2. Fabrication probe. Ask about deliberately fictional CVEs, products, and events.
-     A trustworthy model says it does not know; a hallucinating model invents
-     confident, specific details. We flag answers that show no uncertainty.
-
-Note: fine-tuning teaches behavior and style, not a reliable fact store. If
-groundedness is low or the probe fabrication rate is high, the right fix is RAG
-(retrieve real sources at answer time), not more fine-tuning. See
-cybersecurity_training_plan.md.
-
-Usage:
-    export HF_TOKEN=...
-    python hallucination_check.py \
-        --adapter_dir ./cyber-qa-out/adapter \
-        --val_file data/cybersecurity_qa_val.jsonl
-"""
-
 import argparse
 import json
 import os

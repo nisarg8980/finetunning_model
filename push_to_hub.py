@@ -1,18 +1,4 @@
 #!/usr/bin/env python
-"""
-Upload a folder (merged model or a folder of GGUF files) to the Hugging Face Hub.
-
-Usage:
-    export HF_TOKEN=...      # a WRITE token from https://huggingface.co/settings/tokens
-    # push the merged fp16 model:
-    python push_to_hub.py --src ./mistral7b-qlora-out/merged --repo_id your-username/mistral7b-myfinetune
-    # or push only the GGUF folder (smaller, this is what Ollama pulls):
-    python push_to_hub.py --src ./gguf --repo_id your-username/mistral7b-myfinetune-gguf
-
-Security note (NOW-ISMS-AI-001): the token is read from the environment, never
-hard-coded. Use --private if the fine-tune was trained on sensitive material.
-"""
-
 import argparse
 import os
 
@@ -30,9 +16,10 @@ def main() -> None:
     ap.add_argument("--private", action="store_true", help="Create the repo as private.")
     args = ap.parse_args()
 
-    token = os.environ.get("HF_TOKEN")
+    # Prefer the dedicated write token; fall back to HF_TOKEN for older setups.
+    token = os.environ.get("HF_WRITE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
-        raise SystemExit("HF_TOKEN is not set. Export a WRITE token first.")
+        raise SystemExit("No token found. Set HF_WRITE_TOKEN (a WRITE token) in .env.")
 
     if not os.path.isdir(args.src):
         raise SystemExit(f"Source folder not found: {args.src}")
