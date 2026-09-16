@@ -30,3 +30,16 @@ metrics_report.png
 latency_report.png
 hallucination_report.png
 eval_report.png
+
+# Fine-tuning outputs
+cyber-qa-out/adapter
+
+# Model/checkpoint files
+*.safetensors
+*.pt
+*.bin
+*.ckpt
+
+# Python cache
+__pycache__/
+*.pyc
